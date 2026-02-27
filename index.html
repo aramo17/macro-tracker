@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MacroTracker</title>
+<meta name="description" content="Track macros, scan barcodes, log activity, and monitor body stats.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#000;--surf:#1C1C1E;--bdr:rgba(255,255,255,0.08);--txt:#F5F5F7;--txt2:#98989D;--acc:#0A84FF;
+--pro:#34C759;--carb:#FF9F0A;--fat:#FF375F;--cal:#0A84FF}
+body{font-family:'SF Pro Display',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::-webkit-scrollbar{width:0}
+input[type="range"]{-webkit-appearance:none;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);outline:none;width:100%}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;cursor:pointer;background:var(--acc)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,20px)}to{opacity:1;transform:translate(-50%,0)}}
+.app{max-width:430px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:100px}
+.card{background:var(--surf);border-radius:16px;padding:20px;margin-bottom:12px}
+.inp{background:rgba(255,255,255,0.06);border:1px solid var(--bdr);border-radius:12px;padding:14px 16px;
+color:var(--txt);font-size:16px;width:100%;outline:none;font-family:inherit}
+.btn{background:var(--acc);color:#fff;border:none;border-radius:14px;padding:16px;font-size:17px;
+font-weight:600;cursor:pointer;width:100%;font-family:inherit}
+.btn2{background:rgba(255,255,255,0.06);color:var(--txt);border:1px solid var(--bdr);border-radius:10px;
+padding:8px 16px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
+.pill{display:inline-flex;padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;
+cursor:pointer;border:none;font-family:inherit}
+.pill-on{background:var(--acc);color:#fff}
+.pill-off{background:rgba(255,255,255,0.06);color:var(--txt2)}
+.lbl{font-size:12px;font-weight:600;color:var(--txt2);letter-spacing:0.3px;text-transform:uppercase;
+display:block;margin-bottom:6px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(20px);
+-webkit-backdrop-filter:blur(20px);z-index:2000;display:flex;align-items:flex-end;justify-content:center}
+.modal-box{background:#1C1C1E;border-radius:24px 24px 0 0;width:100%;max-width:430px;max-height:85vh;
+overflow:auto;padding:8px 24px 40px}
+.tab-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;
+background:rgba(28,28,30,0.92);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);
+display:flex;justify-content:space-around;padding:8px 0 28px;border-top:1px solid rgba(255,255,255,0.05);z-index:1000}
+.tab-btn{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:4px;
+cursor:pointer;padding:4px 12px}
+.tab-icon{font-size:20px;transition:all 0.3s}
+.tab-label{font-size:9px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;transition:all 0.3s}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(52,199,89,0.95);
+color:#fff;padding:12px 24px;border-radius:14px;font-size:14px;font-weight:600;z-index:3000;
+backdrop-filter:blur(20px);animation:toastIn 0.3s ease;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+.handle{width:36px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2);margin:8px auto 16px}
+.badge{border-radius:10px;padding:10px 8px;text-align:center}
+.badge-val{font-size:16px;font-weight:700}
+.badge-lbl{font-size:10px;color:var(--txt2);font-weight:600;letter-spacing:0.3px;text-transform:uppercase;margin-top:2px}
+.food-btn{display:flex;justify-content:space-between;align-items:center;width:100%;padding:10px 0;
+background:none;border:none;border-bottom:1px solid var(--bdr);color:var(--txt);cursor:pointer;
+text-align:left;font-family:inherit}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<div class="app" id="app"></div>
+
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+/* ── Constants ─────────────────────────────────────────────────── */
+const MC = { protein: "#34C759", carbs: "#FF9F0A", fat: "#FF375F", cal: "#0A84FF" };
+const MEALS = ["Breakfast", "Lunch", "Dinner", "Snacks"];
+const EXERCISES = [
+  { n: "Running", cpm: 11, i: "🏃" }, { n: "Walking", cpm: 5, i: "🚶" },
+  { n: "Cycling", cpm: 9, i: "🚴" }, { n: "Swimming", cpm: 10, i: "🏊" },
+  { n: "Weights", cpm: 7, i: "🏋️" }, { n: "HIIT", cpm: 13, i: "⚡" },
+  { n: "Yoga", cpm: 4, i: "🧘" }, { n: "Jump Rope", cpm: 12, i: "🤸" },
+];
+const COMMON_FOODS = [
+  { name: "Chicken Breast (grilled)", serving: "6 oz", calories: 280, protein: 52, carbs: 0, fat: 6 },
+  { name: "Brown Rice", serving: "1 cup cooked", calories: 216, protein: 5, carbs: 45, fat: 1.8 },
+  { name: "Sweet Potato", serving: "1 medium", calories: 103, protein: 2, carbs: 24, fat: 0 },
+  { name: "Salmon Fillet", serving: "6 oz", calories: 350, protein: 34, carbs: 0, fat: 22 },
+  { name: "Avocado", serving: "1 whole", calories: 322, protein: 4, carbs: 17, fat: 29 },
+  { name: "Banana", serving: "1 medium", calories: 105, protein: 1.3, carbs: 27, fat: 0.4 },
+  { name: "Almonds", serving: "1 oz", calories: 164, protein: 6, carbs: 6, fat: 14 },
+  { name: "Broccoli", serving: "1 cup", calories: 55, protein: 3.7, carbs: 11, fat: 0.6 },
+  { name: "Greek Yogurt", serving: "1 cup", calories: 130, protein: 22, carbs: 8, fat: 0 },
+  { name: "Steak (sirloin)", serving: "6 oz", calories: 320, protein: 46, carbs: 0, fat: 14 },
+  { name: "White Rice", serving: "1 cup cooked", calories: 206, protein: 4.3, carbs: 45, fat: 0.4 },
+  { name: "Oatmeal", serving: "1 cup cooked", calories: 154, protein: 5, carbs: 27, fat: 2.5 },
+  { name: "Peanut Butter", serving: "2 tbsp", calories: 190, protein: 7, carbs: 7, fat: 16 },
+  { name: "Whey Protein Shake", serving: "1 scoop", calories: 120, protein: 24, carbs: 3, fat: 1 },
+  { name: "Egg (whole)", serving: "1 large", calories: 72, protein: 6, carbs: 0.4, fat: 5 },
+  { name: "Apple", serving: "1 medium", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+  { name: "Pasta (cooked)", serving: "1 cup", calories: 220, protein: 8, carbs: 43, fat: 1.3 },
+  { name: "Cottage Cheese", serving: "1 cup", calories: 220, protein: 25, carbs: 8, fat: 10 },
+  { name: "Olive Oil", serving: "1 tbsp", calories: 119, protein: 0, carbs: 0, fat: 14 },
+  { name: "Turkey Breast", serving: "4 slices", calories: 60, protein: 12, carbs: 2, fat: 0.5 },
+];
+const ACT_LEVELS = [
+  { label: "Seated Job", desc: "Desk/office work, mostly sitting", mult: 1.2 },
+  { label: "Standing Job", desc: "Retail, teaching, light on feet", mult: 1.4 },
+  { label: "Active Job", desc: "Construction, warehouse, walking", mult: 1.6 },
+];
+const today = () => new Date().toISOString().split("T")[0];
+
+/* ── Storage (localStorage) ────────────────────────────────────── */
+const S = {
+  get(k, fb) { try { const d = localStorage.getItem("mt_"+k); return d ? JSON.parse(d) : fb; } catch { return fb; } },
+  set(k, v) { try { localStorage.setItem("mt_"+k, JSON.stringify(v)); } catch(e) { console.error(e); } }
+};
+
+/* ── BMR (Mifflin-St Jeor) ─────────────────────────────────────── */
+const calcBMR = (w_lb, h_in, age, sex) => {
+  const w = w_lb * 0.453592, h = h_in * 2.54;
+  return Math.round(10 * w + 6.25 * h - 5 * age + (sex === "male" ? 5 : -161));
+};
+const calcTDEE = (bmr, al) => Math.round(bmr * ACT_LEVELS[al].mult);
+
+/* ── Barcode Lookup (Open Food Facts API) ──────────────────────── */
+const lookupBarcode = async (code) => {
+  const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+  const data = await resp.json();
+  if (data.status !== 1 || !data.product) return null;
+  const p = data.product;
+  const n = p.nutriments || {};
+  return {
+    name: p.product_name || p.generic_name || "Unknown Product",
+    serving: p.serving_size || p.quantity || "1 serving",
+    calories: Math.round(n["energy-kcal_100g"] * (parseFloat(p.serving_quantity || 100) / 100)) || Math.round(n["energy-kcal_100g"] || 0),
+    protein: Math.round(n.proteins_100g * (parseFloat(p.serving_quantity || 100) / 100)) || Math.round(n.proteins_100g || 0),
+    carbs: Math.round(n.carbohydrates_100g * (parseFloat(p.serving_quantity || 100) / 100)) || Math.round(n.carbohydrates_100g || 0),
+    fat: Math.round(n.fat_100g * (parseFloat(p.serving_quantity || 100) / 100)) || Math.round(n.fat_100g || 0),
+  };
+};
+
+/* ── Ring Component ────────────────────────────────────────────── */
+const Ring = ({ v, max, size = 80, sw = 7, color, children }) => {
+  const r = (size - sw) / 2, c = 2 * Math.PI * r, p = Math.min(v / Math.max(max, 1), 1);
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={sw} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={sw}
+          strokeDasharray={c} strokeDashoffset={c*(1-p)} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 0.6s ease" }} />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
+const Badge = ({ label, value, color }) => (
+  <div className="badge" style={{ background: `${color}15` }}>
+    <div className="badge-val" style={{ color }}>{value}</div>
+    <div className="badge-lbl">{label}</div>
+  </div>
+);
+
+/* ── Main App ──────────────────────────────────────────────────── */
+function App() {
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState("dashboard");
+  const [profile, setProfile] = useState(null);
+  const [goals, setGoals] = useState({ calories: 2200, protein: 180, carbs: 250, fat: 70 });
+  const [foodLog, setFoodLog] = useState({});
+  const [activities, setActivities] = useState({});
+  const [bodyStats, setBodyStats] = useState([]);
+  const [modal, setModal] = useState(null);
+  const [meal, setMeal] = useState("Breakfast");
+  const [search, setSearch] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [scanResult, setScanResult] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [customFood, setCustomFood] = useState({ name:"", serving:"", calories:0, protein:0, carbs:0, fat:0 });
+  const [exForm, setExForm] = useState({ idx: 0, dur: 30 });
+  const [statsForm, setStatsForm] = useState({ weight:"", bodyFat:"", waist:"", chest:"", arms:"" });
+  const [profileForm, setProfileForm] = useState({ weight:"", height_ft:"", height_in:"", age:"", sex:"male", actLevel: 0 });
+  const [toast, setToast] = useState(null);
+
+  const d = today();
+  const dayFoods = foodLog[d] || [];
+  const dayActs = activities[d] || [];
+
+  useEffect(() => {
+    setProfile(S.get("profile", null));
+    setGoals(S.get("goals", { calories: 2200, protein: 180, carbs: 250, fat: 70 }));
+    setFoodLog(S.get("foodLog", {}));
+    setActivities(S.get("activities", {}));
+    setBodyStats(S.get("bodyStats", []));
+    setReady(true);
+    if (!S.get("profile", null)) setModal("profile");
+  }, []);
+
+  const save = (key, val, setter) => { setter(val); S.set(key, val); };
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
+
+  const totals = dayFoods.reduce((a, f) => ({ calories: a.calories+f.calories, protein: a.protein+f.protein, carbs: a.carbs+f.carbs, fat: a.fat+f.fat }), { calories:0, protein:0, carbs:0, fat:0 });
+  const burned = dayActs.reduce((a, x) => a + x.cal, 0);
+  const net = totals.calories - burned;
+  const bmr = profile ? calcBMR(profile.weight, profile.height, profile.age, profile.sex) : null;
+  const tdee = bmr ? calcTDEE(bmr, profile.actLevel) : null;
+
+  /* ── Barcode scan ──────────────────────────────────────────── */
+  const doScan = async (code) => {
+    if (!code.trim()) return;
+    setScanLoading(true); setScanError(""); setScanResult(null);
+    try {
+      const result = await lookupBarcode(code.trim());
+      if (result) setScanResult(result);
+      else setScanError("Product not found. Try another barcode or use manual entry.");
+    } catch (e) {
+      setScanError("Lookup failed. Check your connection and try again.");
+    }
+    setScanLoading(false);
+  };
+
+  /* ── Actions ────────────────────────────────────────────────── */
+  const addFood = (food) => {
+    const updated = { ...foodLog, [d]: [...dayFoods, { ...food, meal, id: Date.now() }] };
+    save("foodLog", updated, setFoodLog); flash(`Added ${food.name}`);
+    setModal(null); setScanResult(null); setSearch(""); setBarcode("");
+  };
+  const removeFood = (id) => { save("foodLog", { ...foodLog, [d]: dayFoods.filter(f => f.id !== id) }, setFoodLog); };
+  const addActivity = () => {
+    const ex = EXERCISES[exForm.idx];
+    const cal = Math.round(ex.cpm * exForm.dur);
+    save("activities", { ...activities, [d]: [...dayActs, { name: ex.n, icon: ex.i, dur: exForm.dur, cal, id: Date.now() }] }, setActivities);
+    flash(`Logged ${ex.n}`);
+  };
+  const removeAct = (id) => { save("activities", { ...activities, [d]: dayActs.filter(a => a.id !== id) }, setActivities); };
+  const addBodyStat = () => {
+    const updated = [...bodyStats, { ...statsForm, date: d, id: Date.now() }];
+    save("bodyStats", updated, setBodyStats); flash("Stats saved");
+    setModal(null); setStatsForm({ weight:"", bodyFat:"", waist:"", chest:"", arms:"" });
+  };
+  const saveProfileForm = () => {
+    const h = (parseInt(profileForm.height_ft)||0)*12 + (parseInt(profileForm.height_in)||0);
+    const p = { weight: parseFloat(profileForm.weight)||170, height: h||70, age: parseInt(profileForm.age)||30, sex: profileForm.sex, actLevel: profileForm.actLevel };
+    save("profile", p, setProfile);
+    const b = calcBMR(p.weight, p.height, p.age, p.sex);
+    const t = calcTDEE(b, p.actLevel);
+    save("goals", { calories: t, protein: Math.round(p.weight * 0.8), carbs: Math.round(t * 0.4 / 4), fat: Math.round(t * 0.25 / 9) }, setGoals);
+    setModal(null); flash("Profile saved! Goals auto-calculated.");
+  };
+
+  const filtered = COMMON_FOODS.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+
+  if (!ready) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column"}}><div style={{fontSize:40,marginBottom:12}}>◉</div><div style={{fontSize:18,fontWeight:600}}>Loading...</div></div>;
+
+  /* ── Dashboard ──────────────────────────────────────────────── */
+  const Dashboard = () => (
+    <div style={{padding:"0 20px",animation:"fadeUp 0.3s ease"}}>
+      {tdee && (
+        <div className="card" style={{background:"linear-gradient(135deg, rgba(10,132,255,0.12), rgba(191,90,242,0.08))",border:"1px solid rgba(10,132,255,0.15)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div className="lbl" style={{marginBottom:2}}>Daily Energy Expenditure</div>
+              <div style={{fontSize:24,fontWeight:800,letterSpacing:"-1px"}}>{tdee} <span style={{fontSize:14,color:"var(--txt2)",fontWeight:500}}>cal/day</span></div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:11,color:"var(--txt2)"}}>BMR: {bmr} cal</div>
+              <div style={{fontSize:11,color:"var(--txt2)"}}>{ACT_LEVELS[profile.actLevel].label}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="card" style={{display:"flex",alignItems:"center",gap:20,padding:24}}>
+        <Ring v={net} max={goals.calories} size={110} sw={9} color={MC.cal}>
+          <span style={{fontSize:24,fontWeight:700,letterSpacing:"-1px"}}>{net}</span>
+          <span style={{fontSize:9,color:"var(--txt2)",fontWeight:600,letterSpacing:"0.5px",textTransform:"uppercase"}}>NET CAL</span>
+        </Ring>
+        <div style={{flex:1}}>
+          <div style={{fontSize:20,fontWeight:700,letterSpacing:"-0.5px",marginBottom:4}}>Daily Summary</div>
+          <div style={{fontSize:13,color:"var(--txt2)",marginBottom:14}}>
+            {goals.calories - net > 0 ? `${goals.calories - net} cal remaining` : "Goal reached! 🎯"}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:"6px 12px",flex:1}}>
+              <div style={{fontSize:10,color:"var(--txt2)",fontWeight:600}}>EATEN</div>
+              <div style={{fontSize:16,fontWeight:700,color:MC.cal}}>{totals.calories}</div>
+            </div>
+            <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:"6px 12px",flex:1}}>
+              <div style={{fontSize:10,color:"var(--txt2)",fontWeight:600}}>BURNED</div>
+              <div style={{fontSize:16,fontWeight:700,color:"#FF375F"}}>{burned}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
+        {[{k:"protein",l:"Protein"},{k:"carbs",l:"Carbs"},{k:"fat",l:"Fat"}].map(m=>(
+          <div key={m.k} className="card" style={{display:"flex",flexDirection:"column",alignItems:"center",padding:16}}>
+            <Ring v={totals[m.k]} max={goals[m.k]} size={64} sw={6} color={MC[m.k]}>
+              <span style={{fontSize:16,fontWeight:700}}>{Math.round(totals[m.k])}</span>
+            </Ring>
+            <span style={{fontSize:10,color:"var(--txt2)",fontWeight:600,marginTop:6,letterSpacing:"0.3px",textTransform:"uppercase"}}>{m.l}</span>
+            <span style={{fontSize:10,color:"var(--txt2)"}}>{Math.round(totals[m.k])}/{goals[m.k]}g</span>
+          </div>
+        ))}
+      </div>
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontSize:18,fontWeight:700}}>Meals</span>
+          <button className="btn2" onClick={()=>setModal("food")}>+ Add Food</button>
+        </div>
+        {MEALS.map(m=>{
+          const mf=dayFoods.filter(f=>f.meal===m), mc=mf.reduce((a,f)=>a+f.calories,0);
+          return(
+            <div key={m} style={{marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--bdr)"}}>
+                <span style={{fontSize:14,fontWeight:600}}>{m}</span>
+                <span style={{fontSize:12,color:"var(--txt2)"}}>{mc} cal</span>
+              </div>
+              {mf.map(f=>(
+                <div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0 8px 12px"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500}}>{f.name}</div>
+                    <div style={{fontSize:11,color:"var(--txt2)"}}>{f.serving} · P:{f.protein}g C:{f.carbs}g F:{f.fat}g</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:13,fontWeight:600,color:MC.cal}}>{f.calories}</span>
+                    <button onClick={()=>removeFood(f.id)} style={{background:"none",border:"none",color:"#FF375F",fontSize:16,cursor:"pointer"}}>×</button>
+                  </div>
+                </div>
+              ))}
+              {mf.length===0&&<div style={{padding:"8px 12px",fontSize:12,color:"rgba(255,255,255,0.15)",fontStyle:"italic"}}>No items</div>}
+            </div>
+          );
+        })}
+      </div>
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontSize:18,fontWeight:700}}>Activity</span>
+          <button className="btn2" onClick={()=>setTab("activity")}>+ Log</button>
+        </div>
+        {dayActs.length===0&&<div style={{fontSize:12,color:"rgba(255,255,255,0.15)",fontStyle:"italic"}}>No activities today</div>}
+        {dayActs.map(a=>(
+          <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--bdr)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:22}}>{a.icon}</span>
+              <div><div style={{fontSize:13,fontWeight:500}}>{a.name}</div><div style={{fontSize:11,color:"var(--txt2)"}}>{a.dur} min</div></div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#FF375F"}}>-{a.cal}</span>
+              <button onClick={()=>removeAct(a.id)} style={{background:"none",border:"none",color:"#FF375F",fontSize:16,cursor:"pointer"}}>×</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  /* ── Scanner ────────────────────────────────────────────────── */
+  const ScannerTab = () => (
+    <div style={{padding:"0 20px",animation:"fadeUp 0.3s ease"}}>
+      <div className="card">
+        <div style={{fontSize:18,fontWeight:700,marginBottom:6}}>Barcode Scanner</div>
+        <p style={{fontSize:13,color:"var(--txt2)",marginBottom:16,lineHeight:1.5}}>
+          Enter any product barcode to look up real nutrition data from the Open Food Facts database.
+        </p>
+        <input type="text" inputMode="numeric" placeholder="Enter barcode number..." value={barcode}
+          onChange={e=>setBarcode(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")doScan(barcode);}}
+          className="inp" style={{marginBottom:12}} />
+        <button onClick={()=>doScan(barcode)} className="btn" style={{opacity:scanLoading?0.6:1,marginBottom:12}} disabled={scanLoading}>
+          {scanLoading ? "🔍 Searching Open Food Facts..." : "🔍 Look Up Barcode"}
+        </button>
+        {scanError && <div style={{fontSize:13,color:"#FF375F",padding:"8px 0"}}>{scanError}</div>}
+        <div style={{fontSize:11,color:"var(--txt2)",marginTop:4}}>Tip: Use your phone camera to read the barcode, then type the number here.</div>
+      </div>
+      {scanResult && (
+        <div className="card" style={{border:`1px solid ${MC.cal}40`,animation:"fadeUp 0.3s ease"}}>
+          <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>{scanResult.name}</div>
+          <div style={{fontSize:12,color:"var(--txt2)",marginBottom:14}}>{scanResult.serving}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
+            <Badge label="Cal" value={scanResult.calories} color={MC.cal} />
+            <Badge label="Pro" value={scanResult.protein+"g"} color={MC.protein} />
+            <Badge label="Carbs" value={scanResult.carbs+"g"} color={MC.carbs} />
+            <Badge label="Fat" value={scanResult.fat+"g"} color={MC.fat} />
+          </div>
+          <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+            {MEALS.map(m=><button key={m} onClick={()=>setMeal(m)} className={`pill ${meal===m?"pill-on":"pill-off"}`}>{m}</button>)}
+          </div>
+          <button onClick={()=>addFood(scanResult)} className="btn">Add to {meal}</button>
+        </div>
+      )}
+      <div className="card">
+        <div style={{fontSize:16,fontWeight:700,marginBottom:12}}>Quick Add from Database</div>
+        <input placeholder="Search foods..." value={search} onChange={e=>setSearch(e.target.value)} className="inp" style={{marginBottom:12}} />
+        <div style={{maxHeight:300,overflow:"auto"}}>
+          {filtered.map((f,i)=>(
+            <button key={i} onClick={()=>addFood(f)} className="food-btn">
+              <div><div style={{fontSize:13,fontWeight:500}}>{f.name}</div><div style={{fontSize:11,color:"var(--txt2)"}}>{f.serving}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:MC.cal}}>{f.calories}</div><div style={{fontSize:9,color:"var(--txt2)"}}>P:{f.protein} C:{f.carbs} F:{f.fat}</div></div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── Activity ───────────────────────────────────────────────── */
+  const ActivityTab = () => (
+    <div style={{padding:"0 20px",animation:"fadeUp 0.3s ease"}}>
+      <div className="card">
+        <div style={{fontSize:18,fontWeight:700,marginBottom:14}}>Log Activity</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+          {EXERCISES.map((ex,i)=>(
+            <button key={i} onClick={()=>setExForm(f=>({...f,idx:i}))}
+              className="card" style={{margin:0,cursor:"pointer",display:"flex",alignItems:"center",gap:10,padding:12,
+              border:exForm.idx===i?`2px solid var(--acc)`:`1px solid var(--bdr)`,background:exForm.idx===i?"rgba(10,132,255,0.06)":"var(--surf)"}}>
+              <span style={{fontSize:20}}>{ex.i}</span>
+              <div style={{textAlign:"left"}}><div style={{fontSize:12,fontWeight:600}}>{ex.n}</div><div style={{fontSize:10,color:"var(--txt2)"}}>{ex.cpm} cal/min</div></div>
+            </button>
+          ))}
+        </div>
+        <div style={{marginBottom:14}}>
+          <label className="lbl">Duration: {exForm.dur} min</label>
+          <input type="range" min={5} max={180} step={5} value={exForm.dur} onChange={e=>setExForm(f=>({...f,dur:+e.target.value}))} />
+        </div>
+        <div className="card" style={{background:"rgba(255,55,95,0.08)",border:"1px solid rgba(255,55,95,0.2)",margin:"0 0 14px"}}>
+          <div style={{fontSize:10,color:"var(--txt2)",fontWeight:600,letterSpacing:"0.3px",textTransform:"uppercase"}}>Est. Burn</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#FF375F"}}>{Math.round(EXERCISES[exForm.idx].cpm*exForm.dur)} cal</div>
+        </div>
+        <button onClick={addActivity} className="btn">Log Activity</button>
+      </div>
+      <div className="card">
+        <div style={{fontSize:16,fontWeight:700,marginBottom:10}}>Today's Activities</div>
+        {dayActs.length===0&&<div style={{fontSize:12,color:"rgba(255,255,255,0.15)",fontStyle:"italic"}}>Nothing yet</div>}
+        {dayActs.map(a=>(
+          <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid var(--bdr)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:24}}>{a.icon}</span>
+              <div><div style={{fontSize:14,fontWeight:600}}>{a.name}</div><div style={{fontSize:11,color:"var(--txt2)"}}>{a.dur} min</div></div>
+            </div>
+            <span style={{fontSize:15,fontWeight:700,color:"#FF375F"}}>-{a.cal} cal</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  /* ── Body Stats ─────────────────────────────────────────────── */
+  const StatsTab = () => {
+    const latest = bodyStats[bodyStats.length-1];
+    const prev = bodyStats.length>1?bodyStats[bodyStats.length-2]:null;
+    const wd = latest?.weight&&prev?.weight?(parseFloat(latest.weight)-parseFloat(prev.weight)).toFixed(1):null;
+    return(
+      <div style={{padding:"0 20px",animation:"fadeUp 0.3s ease"}}>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <span style={{fontSize:18,fontWeight:700}}>Body Stats</span>
+            <button className="btn2" onClick={()=>setModal("stats")}>+ Record</button>
+          </div>
+          {latest?(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {latest.weight&&<div style={{background:`${MC.cal}10`,borderRadius:14,padding:16}}><div className="lbl">Weight</div><div style={{fontSize:22,fontWeight:800}}>{latest.weight} lbs</div>{wd&&<div style={{fontSize:12,color:wd>0?"#FF375F":"#34C759",fontWeight:600,marginTop:4}}>{wd>0?"+":""}{wd} lbs</div>}</div>}
+              {latest.bodyFat&&<div style={{background:`${MC.carbs}10`,borderRadius:14,padding:16}}><div className="lbl">Body Fat</div><div style={{fontSize:22,fontWeight:800}}>{latest.bodyFat}%</div></div>}
+              {latest.waist&&<div style={{background:`${MC.cal}10`,borderRadius:14,padding:16}}><div className="lbl">Waist</div><div style={{fontSize:22,fontWeight:800}}>{latest.waist}"</div></div>}
+              {latest.arms&&<div style={{background:`${MC.protein}10`,borderRadius:14,padding:16}}><div className="lbl">Arms</div><div style={{fontSize:22,fontWeight:800}}>{latest.arms}"</div></div>}
+            </div>
+          ):<div style={{textAlign:"center",padding:24,fontSize:13,color:"var(--txt2)"}}>No stats recorded yet</div>}
+        </div>
+        {bodyStats.length>0&&(
+          <div className="card">
+            <div style={{fontSize:16,fontWeight:700,marginBottom:10}}>History</div>
+            {[...bodyStats].reverse().slice(0,10).map(s=>(
+              <div key={s.id} style={{padding:"8px 0",borderBottom:"1px solid var(--bdr)",display:"flex",justifyContent:"space-between",fontSize:13}}>
+                <span style={{color:"var(--txt2)"}}>{s.date}</span>
+                <div style={{display:"flex",gap:14,fontWeight:600}}>
+                  {s.weight&&<span>{s.weight}lbs</span>}
+                  {s.bodyFat&&<span style={{color:MC.carbs}}>{s.bodyFat}%</span>}
+                  {s.waist&&<span style={{color:MC.cal}}>{s.waist}"</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /* ── Goals ───────────────────────────────────────────────────── */
+  const GoalsTab = () => {
+    const [ed, setEd] = useState({...goals});
+    return(
+      <div style={{padding:"0 20px",animation:"fadeUp 0.3s ease"}}>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <span style={{fontSize:18,fontWeight:700}}>Profile & TDEE</span>
+            <button className="btn2" onClick={()=>{if(profile)setProfileForm({weight:String(profile.weight),height_ft:String(Math.floor(profile.height/12)),height_in:String(profile.height%12),age:String(profile.age),sex:profile.sex,actLevel:profile.actLevel});setModal("profile");}}>Edit</button>
+          </div>
+          {profile?(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
+                <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:12,textAlign:"center"}}><div style={{fontSize:10,color:"var(--txt2)",fontWeight:600}}>HEIGHT</div><div style={{fontSize:16,fontWeight:700}}>{Math.floor(profile.height/12)}'{profile.height%12}"</div></div>
+                <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:12,textAlign:"center"}}><div style={{fontSize:10,color:"var(--txt2)",fontWeight:600}}>WEIGHT</div><div style={{fontSize:16,fontWeight:700}}>{profile.weight} lbs</div></div>
+                <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:12,textAlign:"center"}}><div style={{fontSize:10,color:"var(--txt2)",fontWeight:600}}>AGE</div><div style={{fontSize:16,fontWeight:700}}>{profile.age}</div></div>
+              </div>
+              <div style={{background:"linear-gradient(135deg,rgba(10,132,255,0.1),rgba(52,199,89,0.08))",borderRadius:12,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontSize:12,color:"var(--txt2)"}}>Base Metabolic Rate (BMR)</span>
+                  <span style={{fontSize:14,fontWeight:700}}>{bmr} cal</span>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontSize:12,color:"var(--txt2)"}}>Activity: {ACT_LEVELS[profile.actLevel].label}</span>
+                  <span style={{fontSize:14,fontWeight:700}}>×{ACT_LEVELS[profile.actLevel].mult}</span>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid var(--bdr)",paddingTop:6}}>
+                  <span style={{fontSize:13,fontWeight:600,color:"var(--acc)"}}>Total Daily Energy (TDEE)</span>
+                  <span style={{fontSize:18,fontWeight:800,color:"var(--acc)"}}>{tdee} cal</span>
+                </div>
+                <div style={{fontSize:11,color:"var(--txt2)",marginTop:8,lineHeight:1.5}}>
+                  This is how many calories your body burns daily through everyday life with a {ACT_LEVELS[profile.actLevel].label.toLowerCase()} activity level.
+                </div>
+              </div>
+            </div>
+          ):<div style={{fontSize:13,color:"var(--txt2)"}}>Set up your profile to calculate TDEE</div>}
+        </div>
+        <div className="card">
+          <div style={{fontSize:18,fontWeight:700,marginBottom:18}}>Daily Goals</div>
+          {[
+            {k:"calories",l:"Calories",u:"cal",c:MC.cal,min:1000,max:5000,step:50},
+            {k:"protein",l:"Protein",u:"g",c:MC.protein,min:20,max:400,step:5},
+            {k:"carbs",l:"Carbs",u:"g",c:MC.carbs,min:20,max:500,step:5},
+            {k:"fat",l:"Fat",u:"g",c:MC.fat,min:10,max:250,step:5},
+          ].map(g=>(
+            <div key={g.k} style={{marginBottom:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <label style={{fontSize:14,fontWeight:600}}>{g.l}</label>
+                <span style={{fontSize:14,fontWeight:700,color:g.c}}>{ed[g.k]} {g.u}</span>
+              </div>
+              <input type="range" min={g.min} max={g.max} step={g.step} value={ed[g.k]} onChange={e=>setEd(p=>({...p,[g.k]:+e.target.value}))} style={{accentColor:g.c}} />
+            </div>
+          ))}
+          {(()=>{const t=ed.protein*4+ed.carbs*4+ed.fat*9;return(
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",height:8,borderRadius:4,overflow:"hidden",marginBottom:8}}>
+                <div style={{width:`${ed.protein*4/t*100}%`,background:MC.protein}} />
+                <div style={{width:`${ed.carbs*4/t*100}%`,background:MC.carbs}} />
+                <div style={{width:`${ed.fat*9/t*100}%`,background:MC.fat}} />
+              </div>
+              <div style={{display:"flex",justifyContent:"space-around",fontSize:12}}>
+                <span style={{color:MC.protein,fontWeight:600}}>P: {Math.round(ed.protein*4/t*100)}%</span>
+                <span style={{color:MC.carbs,fontWeight:600}}>C: {Math.round(ed.carbs*4/t*100)}%</span>
+                <span style={{color:MC.fat,fontWeight:600}}>F: {Math.round(ed.fat*9/t*100)}%</span>
+              </div>
+            </div>
+          );})()}
+          <button onClick={()=>{save("goals",ed,setGoals);flash("Goals saved!");}} className="btn">Save Goals</button>
+        </div>
+      </div>
+    );
+  };
+
+  /* ── Modals ──────────────────────────────────────────────────── */
+  const AddFoodModal = () => (
+    <div className="modal-overlay" onClick={()=>setModal(null)}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="handle" />
+        <div style={{fontSize:20,fontWeight:700,marginBottom:14}}>Add Food</div>
+        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+          {MEALS.map(m=><button key={m} onClick={()=>setMeal(m)} className={`pill ${meal===m?"pill-on":"pill-off"}`}>{m}</button>)}
+        </div>
+        <input placeholder="Search foods..." value={search} onChange={e=>setSearch(e.target.value)} className="inp" style={{marginBottom:12}} />
+        <div style={{maxHeight:200,overflow:"auto",marginBottom:16}}>
+          {filtered.map((f,i)=>(
+            <button key={i} onClick={()=>addFood(f)} className="food-btn">
+              <div><div style={{fontSize:13,fontWeight:500}}>{f.name}</div><div style={{fontSize:11,color:"var(--txt2)"}}>{f.serving}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:MC.cal}}>{f.calories}</div><div style={{fontSize:9,color:"var(--txt2)"}}>P:{f.protein} C:{f.carbs} F:{f.fat}</div></div>
+            </button>
+          ))}
+        </div>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Custom Entry</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+          <input placeholder="Food name" value={customFood.name} onChange={e=>setCustomFood(f=>({...f,name:e.target.value}))} className="inp" />
+          <input placeholder="Serving" value={customFood.serving} onChange={e=>setCustomFood(f=>({...f,serving:e.target.value}))} className="inp" />
+          <input placeholder="Calories" type="number" value={customFood.calories||""} onChange={e=>setCustomFood(f=>({...f,calories:+e.target.value}))} className="inp" />
+          <input placeholder="Protein (g)" type="number" value={customFood.protein||""} onChange={e=>setCustomFood(f=>({...f,protein:+e.target.value}))} className="inp" />
+          <input placeholder="Carbs (g)" type="number" value={customFood.carbs||""} onChange={e=>setCustomFood(f=>({...f,carbs:+e.target.value}))} className="inp" />
+          <input placeholder="Fat (g)" type="number" value={customFood.fat||""} onChange={e=>setCustomFood(f=>({...f,fat:+e.target.value}))} className="inp" />
+        </div>
+        <button onClick={()=>{if(customFood.name){addFood(customFood);setCustomFood({name:"",serving:"",calories:0,protein:0,carbs:0,fat:0});}}} className="btn">Add Custom Food</button>
+      </div>
+    </div>
+  );
+
+  const AddStatsModal = () => (
+    <div className="modal-overlay" onClick={()=>setModal(null)}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="handle" />
+        <div style={{fontSize:20,fontWeight:700,marginBottom:16}}>Record Body Stats</div>
+        <div style={{display:"grid",gap:12,marginBottom:16}}>
+          <div><label className="lbl">Weight (lbs)</label><input type="number" placeholder="185" value={statsForm.weight} onChange={e=>setStatsForm(f=>({...f,weight:e.target.value}))} className="inp" /></div>
+          <div><label className="lbl">Body Fat %</label><input type="number" placeholder="18" value={statsForm.bodyFat} onChange={e=>setStatsForm(f=>({...f,bodyFat:e.target.value}))} className="inp" /></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            <div><label className="lbl">Waist"</label><input type="number" placeholder="34" value={statsForm.waist} onChange={e=>setStatsForm(f=>({...f,waist:e.target.value}))} className="inp" /></div>
+            <div><label className="lbl">Chest"</label><input type="number" placeholder="42" value={statsForm.chest} onChange={e=>setStatsForm(f=>({...f,chest:e.target.value}))} className="inp" /></div>
+            <div><label className="lbl">Arms"</label><input type="number" placeholder="15" value={statsForm.arms} onChange={e=>setStatsForm(f=>({...f,arms:e.target.value}))} className="inp" /></div>
+          </div>
+        </div>
+        <button onClick={addBodyStat} className="btn">Save Stats</button>
+      </div>
+    </div>
+  );
+
+  const ProfileModal = () => (
+    <div className="modal-overlay" onClick={()=>{if(profile)setModal(null);}}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="handle" />
+        <div style={{fontSize:20,fontWeight:700,marginBottom:4}}>Your Profile</div>
+        <div style={{fontSize:13,color:"var(--txt2)",marginBottom:16,lineHeight:1.5}}>
+          We use the Mifflin-St Jeor equation to calculate your BMR, then multiply by your daily activity level to find your TDEE — the total calories you burn each day just by living.
+        </div>
+        <div style={{display:"grid",gap:12,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div><label className="lbl">Height (ft)</label><input type="number" placeholder="5" value={profileForm.height_ft} onChange={e=>setProfileForm(f=>({...f,height_ft:e.target.value}))} className="inp" /></div>
+            <div><label className="lbl">Height (in)</label><input type="number" placeholder="10" value={profileForm.height_in} onChange={e=>setProfileForm(f=>({...f,height_in:e.target.value}))} className="inp" /></div>
+          </div>
+          <div><label className="lbl">Weight (lbs)</label><input type="number" placeholder="185" value={profileForm.weight} onChange={e=>setProfileForm(f=>({...f,weight:e.target.value}))} className="inp" /></div>
+          <div><label className="lbl">Age</label><input type="number" placeholder="30" value={profileForm.age} onChange={e=>setProfileForm(f=>({...f,age:e.target.value}))} className="inp" /></div>
+          <div>
+            <label className="lbl">Sex</label>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setProfileForm(f=>({...f,sex:"male"}))} className={`pill ${profileForm.sex==="male"?"pill-on":"pill-off"}`}>Male</button>
+              <button onClick={()=>setProfileForm(f=>({...f,sex:"female"}))} className={`pill ${profileForm.sex==="female"?"pill-on":"pill-off"}`}>Female</button>
+            </div>
+          </div>
+          <div>
+            <label className="lbl">Activity Level</label>
+            <div style={{display:"grid",gap:8}}>
+              {ACT_LEVELS.map((a,i)=>(
+                <button key={i} onClick={()=>setProfileForm(f=>({...f,actLevel:i}))}
+                  className="card" style={{margin:0,cursor:"pointer",padding:14,textAlign:"left",
+                  border:profileForm.actLevel===i?`2px solid var(--acc)`:`1px solid var(--bdr)`,
+                  background:profileForm.actLevel===i?"rgba(10,132,255,0.06)":"var(--surf)"}}>
+                  <div style={{fontSize:14,fontWeight:600}}>{a.label} <span style={{color:"var(--acc)"}}>×{a.mult}</span></div>
+                  <div style={{fontSize:12,color:"var(--txt2)"}}>{a.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {profileForm.weight&&profileForm.height_ft&&profileForm.age&&(()=>{
+          const h=parseInt(profileForm.height_ft)*12+(parseInt(profileForm.height_in)||0);
+          const b=calcBMR(parseFloat(profileForm.weight),h,parseInt(profileForm.age),profileForm.sex);
+          const t=calcTDEE(b,profileForm.actLevel);
+          return(
+            <div style={{background:"rgba(10,132,255,0.08)",borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{fontSize:12,color:"var(--txt2)",marginBottom:4}}>Preview: Your body burns approximately</div>
+              <div style={{fontSize:28,fontWeight:800,color:"var(--acc)",letterSpacing:"-1px"}}>{t} cal/day</div>
+              <div style={{fontSize:12,color:"var(--txt2)"}}>BMR: {b} cal × {ACT_LEVELS[profileForm.actLevel].mult} ({ACT_LEVELS[profileForm.actLevel].label})</div>
+            </div>
+          );
+        })()}
+        <button onClick={saveProfileForm} className="btn">Save Profile & Set Goals</button>
+      </div>
+    </div>
+  );
+
+  /* ── Render ──────────────────────────────────────────────────── */
+  return (
+    <>
+      <div style={{padding:"56px 24px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:26,fontWeight:800,letterSpacing:"-1px"}}>
+            {tab==="dashboard"?"Dashboard":tab==="scanner"?"Scanner":tab==="activity"?"Activity":tab==="stats"?"Body":"Goals"}
+          </div>
+          <div style={{fontSize:12,color:"var(--txt2)",marginTop:2}}>
+            {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+          </div>
+        </div>
+        <button onClick={()=>{if(profile)setProfileForm({weight:String(profile.weight),height_ft:String(Math.floor(profile.height/12)),height_in:String(profile.height%12),age:String(profile.age),sex:profile.sex,actLevel:profile.actLevel});setModal("profile");}}
+          style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#0A84FF,#BF5AF2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:800,border:"none",color:"#fff",cursor:"pointer"}}>R</button>
+      </div>
+      {tab==="dashboard"&&<Dashboard />}
+      {tab==="scanner"&&<ScannerTab />}
+      {tab==="activity"&&<ActivityTab />}
+      {tab==="stats"&&<StatsTab />}
+      {tab==="goals"&&<GoalsTab />}
+      {modal==="food"&&<AddFoodModal />}
+      {modal==="stats"&&<AddStatsModal />}
+      {modal==="profile"&&<ProfileModal />}
+      <div className="tab-bar">
+        {[{id:"dashboard",icon:"◉",l:"Home"},{id:"scanner",icon:"⊞",l:"Scan"},{id:"activity",icon:"↯",l:"Activity"},{id:"stats",icon:"◎",l:"Body"},{id:"goals",icon:"⚙",l:"Goals"}].map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} className="tab-btn">
+            <span className="tab-icon" style={{opacity:tab===t.id?1:0.4}}>{t.icon}</span>
+            <span className="tab-label" style={{color:tab===t.id?"var(--acc)":"var(--txt2)"}}>{t.l}</span>
+          </button>
+        ))}
+      </div>
+      {toast&&<div className="toast">{toast}</div>}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+</script>
+</body>
+</html>
