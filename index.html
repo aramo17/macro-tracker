@@ -37,6 +37,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
 .fb{display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 0;background:none;border:none;border-bottom:1px solid var(--bd);color:var(--t1);cursor:pointer;text-align:left;font-family:inherit}
 .qb{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:rgba(255,255,255,.06);color:var(--t1);font-size:20px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .sn{width:20px;height:20px;border:2px solid rgba(255,255,255,.1);border-top:2px solid var(--ac);border-radius:50%;animation:sp .8s linear infinite;display:inline-block}
+video{width:100%!important;height:100%!important;object-fit:cover;border-radius:12px}
+canvas.drawingBuffer{display:none!important}
 </style>
 </head>
 <body>
@@ -44,6 +46,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 <script type="text/babel">
 const{useState,useEffect,useCallback,useRef,useMemo}=React;
 const MC={protein:"#34C759",carbs:"#FF9F0A",fat:"#FF375F",cal:"#0A84FF"};
@@ -57,12 +60,12 @@ const calcBMR=(w,h,a,s)=>Math.round(10*w*.453592+6.25*h*2.54-5*a+(s==="male"?5:-
 const calcTDEE=(b,al)=>Math.round(b*AL[al].mult);
 
 const searchAPI=async q=>{if(!q||q.length<2)return[];
-try{const r=await fetch("https://world.openfoodfacts.org/cgi/search.pl?search_terms="+encodeURIComponent(q)+"&search_simple=1&action=process&json=1&page_size=8&fields=product_name,nutriments,serving_size,serving_quantity");
+try{const r=await fetch("https://us.openfoodfacts.org/cgi/search.pl?search_terms="+encodeURIComponent(q)+"&search_simple=1&action=process&json=1&page_size=12&fields=product_name,nutriments,serving_size,serving_quantity,countries_tags&tagtype_0=countries&tag_contains_0=contains&tag_0=united-states&lc=en");
 const d=await r.json();if(!d.products)return[];
 return d.products.filter(p=>p.product_name).map(p=>{const n=p.nutriments||{},sq=parseFloat(p.serving_quantity||100),per=sq/100;
 return{name:p.product_name,serving:p.serving_size||sq+"g",calories:Math.round((n["energy-kcal_100g"]||0)*per),protein:Math.round((n.proteins_100g||0)*per),carbs:Math.round((n.carbohydrates_100g||0)*per),fat:Math.round((n.fat_100g||0)*per)}}).filter(f=>f.calories>0)}catch{return[]}};
 
-const lookupBC=async code=>{try{const r=await fetch("https://world.openfoodfacts.org/api/v2/product/"+code+".json");
+const lookupBC=async code=>{try{const r=await fetch("https://us.openfoodfacts.org/api/v2/product/"+code+".json");
 const d=await r.json();if(d.status!==1||!d.product)return null;const p=d.product,n=p.nutriments||{},sq=parseFloat(p.serving_quantity||100),per=sq/100;
 return{name:p.product_name||"Unknown",serving:p.serving_size||"1 serving",calories:Math.round((n["energy-kcal_100g"]||0)*per),protein:Math.round((n.proteins_100g||0)*per),carbs:Math.round((n.carbohydrates_100g||0)*per),fat:Math.round((n.fat_100g||0)*per)}}catch{return null}};
 
@@ -84,6 +87,7 @@ const[modal,sMod]=useState(null),[toast,sToast]=useState(null),[meal,sMeal]=useS
 // KEY FIX: all form state at top level so inputs don't unmount
 const[selFood,sSel]=useState(null),[qty,sQty]=useState(1);
 const[bc,sBc]=useState(""),[scanRes,sSR]=useState(null),[scanLoad,sSL]=useState(false),[scanErr,sSE]=useState(""),[scanQty,sSQ]=useState(1);
+const[camOn,sCam]=useState(false);const camRef=useRef(null);
 const[srch,sSrch]=useState(""),[apiRes,sAR]=useState([]),[apiLoad,sAL]=useState(false);
 const tmr=useRef(null);
 const[exF,sEF]=useState({idx:0,dur:30});
@@ -111,6 +115,16 @@ const localF=useMemo(()=>CF.filter(f=>!srch||f.name.toLowerCase().includes(srch.
 
 const doScan=async code=>{if(!code.trim())return;sSL(true);sSE("");sSR(null);sSQ(1);
 try{const r=await lookupBC(code.trim());r?sSR(r):sSE("Product not found.")}catch{sSE("Lookup failed.")}sSL(false)};
+
+const startCam=()=>{sCam(true);setTimeout(()=>{if(!camRef.current||typeof Quagga==="undefined")return;
+Quagga.init({inputStream:{name:"Live",type:"LiveStream",target:camRef.current,
+constraints:{facingMode:"environment",width:{ideal:640},height:{ideal:480}}},
+decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]},
+locate:true,frequency:10},function(err){if(err){sSE("Camera access denied or not available.");sCam(false);return}
+Quagga.start()});
+Quagga.onDetected(function(result){if(result&&result.codeResult){const code=result.codeResult.code;
+Quagga.stop();sCam(false);sBc(code);doScan(code)}})},100)};
+const stopCam=()=>{try{Quagga.stop()}catch{}sCam(false)};
 
 const addFood=food=>{if(!food){sSel(null);sQty(1);return}
 sv("foodLog",{...foodLog,[d]:[...df,{...food,meal,id:Date.now()}]},sFL);flash("Added "+food.name);
@@ -209,7 +223,16 @@ style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg
 {/* SCANNER TAB */}
 {tab==="scanner"&&<div style={{padding:"0 20px",animation:"fu .3s"}}>
 <div className="cd"><div style={{fontSize:18,fontWeight:700,marginBottom:6}}>Barcode Scanner</div>
-<p style={{fontSize:13,color:"var(--t2)",marginBottom:16,lineHeight:1.5}}>Enter any product barcode to look up real nutrition from Open Food Facts.</p>
+<p style={{fontSize:13,color:"var(--t2)",marginBottom:16,lineHeight:1.5}}>Scan with your camera or type a barcode to look up nutrition data.</p>
+
+{/* Camera Scanner */}
+{camOn?<div style={{marginBottom:16}}>
+<div ref={camRef} style={{borderRadius:12,overflow:"hidden",marginBottom:12,background:"#000",position:"relative",width:"100%",aspectRatio:"4/3"}}></div>
+<button onClick={stopCam} className="bt" style={{background:"#FF375F"}}>Stop Camera</button></div>
+:<button onClick={startCam} className="bt" style={{marginBottom:12,background:"linear-gradient(135deg,#0A84FF,#BF5AF2)"}}>\u{1F4F7} Scan with Camera</button>}
+
+{/* Manual Entry */}
+<div style={{fontSize:13,fontWeight:600,color:"var(--t2)",marginBottom:8,marginTop:camOn?0:4}}>Or enter barcode manually:</div>
 <input type="text" inputMode="numeric" placeholder="Enter barcode number..." value={bc} onChange={e=>sBc(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")doScan(bc)}} className="ip" style={{marginBottom:12}}/>
 <button onClick={()=>doScan(bc)} className="bt" disabled={scanLoad} style={{marginBottom:12}}>{scanLoad?"Searching...":"Look Up Barcode"}</button>
 {scanErr&&<div style={{fontSize:13,color:"#FF375F",padding:"8px 0"}}>{scanErr}</div>}</div>
@@ -319,7 +342,7 @@ return(<div style={{background:"rgba(10,132,255,.08)",borderRadius:12,padding:14
 
 {/* Tab Bar */}
 <div className="tb">{[{id:"dashboard",i:"\u25C9",l:"Home"},{id:"scanner",i:"\u229E",l:"Scan"},{id:"activity",i:"\u21AF",l:"Activity"},{id:"stats",i:"\u25CE",l:"Body"},{id:"goals",i:"\u2699",l:"Goals"}].map(t=>
-<button key={t.id} onClick={()=>sTab(t.id)} className="tt"><span style={{fontSize:20,opacity:tab===t.id?1:.4,transition:"all .3s"}}>{t.i}</span>
+<button key={t.id} onClick={()=>{if(camOn)stopCam();sTab(t.id)}} className="tt"><span style={{fontSize:20,opacity:tab===t.id?1:.4,transition:"all .3s"}}>{t.i}</span>
 <span style={{fontSize:9,fontWeight:600,letterSpacing:".3px",textTransform:"uppercase",color:tab===t.id?"var(--ac)":"var(--t2)",transition:"all .3s"}}>{t.l}</span></button>)}</div>
 {toast&&<div className="ts">{toast}</div>}
 </>)}
